@@ -72,6 +72,26 @@
                 :delete-palette="deletePalette"
                 :show-rename-palette="showRenamePalette"
             />
+            <div :class="$style.overrideColorsContainer">
+                <checkbox
+                    label="Override colors"
+                    tooltip="Remap each palette color in the dithered image to an Amstrad CPC 6128 color"
+                    v-model="overrideColorsEnabled"
+                />
+                <div
+                    v-if="overrideColorsEnabled"
+                    :class="$style.colorsListContainer"
+                >
+                    <color-override-input
+                        v-for="(color, i) in colors"
+                        :key="i"
+                        :color-index.number="i"
+                        :model-value="overrideColors[i]"
+                        :is-disabled="i >= numColors"
+                        @update:model-value="updateOverrideColor(i, $event)"
+                    />
+                </div>
+            </div>
         </fieldset>
         <fieldset>
             <legend>Optimize palette</legend>
@@ -125,6 +145,13 @@
     gap: 16px 13px;
 }
 
+.overrideColorsContainer {
+    margin-top: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
 .optimizePalettePending {
     color: var(--hint-text-color);
     font-size: 14px;
@@ -148,6 +175,7 @@ import {
     getColorDitherAlgorithms,
 } from '../models/dither-algorithms.js';
 import Palettes from '../models/color-palettes.js';
+import AmstradCpcPalette from '../models/amstrad-cpc-palette.js';
 import UserSettings from '../user-settings.js';
 import ColorDitherModes from '../../shared/color-dither-modes.js';
 import Canvas from '../canvas.js';
@@ -159,6 +187,8 @@ import WorkerUtil from '../worker-util.js';
 import CyclePropertyList from './cycle-property-list.vue';
 import ColorPickerComponent from './color-picker.vue';
 import ColorInput from './color-input.vue';
+import ColorOverrideInput from './color-override-input.vue';
+import Checkbox from './checkbox.vue';
 import PaletteButtons from './palette-buttons.vue';
 import ColorCountInput from './color-count-input.vue';
 import DitherButton from './dither-button.vue';
@@ -209,6 +239,8 @@ export default {
         CyclePropertyList,
         'color-picker': ColorPickerComponent,
         ColorInput,
+        ColorOverrideInput,
+        Checkbox,
         PaletteButtons,
         ColorCountInput,
         DitherButton,
@@ -266,6 +298,10 @@ export default {
             colorPickerColorIndex: 0,
             hasColorPickerChangedTheColor: false,
             selectedPaletteIndexBeforeColorPickerOpened: 0,
+            //override colors: remaps each palette color in the dithered
+            //output to an Amstrad CPC color (positionally, by palette index)
+            overrideColorsEnabled: false,
+            overrideColors: [],
         };
     },
     computed: {
@@ -388,6 +424,22 @@ export default {
                 this.ditherImageWithSelectedAlgorithm();
             }
         },
+        overrideColorsEnabled(isEnabled) {
+            if (isEnabled) {
+                this.initializeOverrideColors();
+            }
+            if (this.isLivePreviewEnabled) {
+                this.ditherImageWithSelectedAlgorithm();
+            }
+        },
+        overrideColors: {
+            deep: true,
+            handler() {
+                if (this.overrideColorsEnabled && this.isLivePreviewEnabled) {
+                    this.ditherImageWithSelectedAlgorithm();
+                }
+            },
+        },
     },
     methods: {
         //isNewImage is used to determine if the image is actually different,
@@ -447,6 +499,23 @@ export default {
                             0,
                             0
                         );
+                        if (this.overrideColorsEnabled) {
+                            const width = this.loadedImage.width;
+                            const height = this.loadedImage.height;
+                            const imageData =
+                                transformCanvas.context.getImageData(
+                                    0,
+                                    0,
+                                    width,
+                                    height
+                                );
+                            this.remapPixelsToOverrideColors(imageData.data);
+                            transformCanvas.context.putImageData(
+                                imageData,
+                                0,
+                                0
+                            );
+                        }
                         this.requestDisplayTransformedImage();
                     }
                 );
@@ -535,6 +604,9 @@ export default {
             Histogram.drawColorHistogram(histogramCanvas, huePercentages);
         },
         ditherWorkerMessageReceived(pixels) {
+            if (this.overrideColorsEnabled) {
+                this.remapPixelsToOverrideColors(pixels);
+            }
             this.requestCanvases(transformCanvas => {
                 Canvas.loadPixels(
                     transformCanvas,
@@ -689,6 +761,47 @@ export default {
                     previousColorHex;
             }
             this.shouldShowColorPicker = false;
+        },
+        /**
+         * Override colors functions
+         */
+        //seeds each override slot with the nearest Amstrad CPC color to the
+        //current palette color, so enabling the option produces a sensible result
+        initializeOverrideColors() {
+            this.overrideColors = this.colors.map(colorHex =>
+                AmstradCpcPalette.nearestColor(colorHex)
+            );
+        },
+        updateOverrideColor(index, colorHex) {
+            const overrideColorsCopy = this.overrideColors.slice();
+            overrideColorsCopy[index] = colorHex;
+            this.overrideColors = overrideColorsCopy;
+        },
+        //remaps every active palette color in the dithered pixels (rgba) to its
+        //override color, leaving the dither pattern itself untouched
+        remapPixelsToOverrideColors(pixels) {
+            const colorMap = new Map();
+            this.selectedColors.forEach((colorHex, i) => {
+                const overrideHex = this.overrideColors[i];
+                if (!overrideHex) {
+                    return;
+                }
+                const source = ColorPicker.pixelFromHex(colorHex);
+                const sourceKey =
+                    (source[0] << 16) | (source[1] << 8) | source[2];
+                colorMap.set(sourceKey, ColorPicker.pixelFromHex(overrideHex));
+            });
+
+            for (let i = 0; i < pixels.length; i += 4) {
+                const key =
+                    (pixels[i] << 16) | (pixels[i + 1] << 8) | pixels[i + 2];
+                const replacement = colorMap.get(key);
+                if (replacement) {
+                    pixels[i] = replacement[0];
+                    pixels[i + 1] = replacement[1];
+                    pixels[i + 2] = replacement[2];
+                }
+            }
         },
     },
 };
