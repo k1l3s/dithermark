@@ -229,6 +229,7 @@ import {
 import Canvas from '../canvas.js';
 import {
     saveImage,
+    saveImageWithConfig,
     canvasToArray,
     arrayToObjectUrl,
     canvasToBlob,
@@ -321,6 +322,11 @@ export default {
         isDev: {
             type: Boolean,
             required: true,
+        },
+        //returns the current dither config object to embed in the PNG, or null
+        getDitherConfig: {
+            type: Function,
+            default: null,
         },
     },
     emits: ['update:shouldUpsample'],
@@ -559,12 +565,17 @@ export default {
         },
         //downloads image
         saveImage() {
+            const config = this.getDitherConfig
+                ? this.getDitherConfig()
+                : null;
+            const configJson = config ? JSON.stringify(config) : null;
             return this.saveImageBase(
                 (sourceCanvas, unsplash) =>
                     new Promise((resolve, reject) => {
-                        saveImage(
+                        saveImageWithConfig(
                             sourceCanvas.canvas,
                             this.saveImageFileType.mime,
+                            configJson,
                             objectUrl => {
                                 const saveImageLink = this.$refs.saveImageLink;
                                 saveImageLink.href = objectUrl;

@@ -4,6 +4,8 @@
  * @property {string} type
  */
 
+import { embedConfigInPng } from './png-config.js';
+
 class HttpRequestError extends Error {
     constructor(message, statusCode, statusMessage, url) {
         super(message);
@@ -190,6 +192,34 @@ export const saveImage = (canvas, mimeType, callback) => {
     canvasToBlob(canvas, mimeType).then(blob =>
         blobToObjectUrl(blob, callback)
     );
+};
+
+/**
+ * Saves the image, embedding the given config JSON into the PNG (as a tEXt
+ * chunk) when the format is PNG. For non-PNG formats (which can't carry the
+ * metadata) it falls back to a normal save.
+ *
+ * @param {HTMLCanvasElement} canvas
+ * @param {string} mimeType
+ * @param {string|null} configJson
+ * @param {Function} callback
+ */
+export const saveImageWithConfig = (canvas, mimeType, configJson, callback) => {
+    if (!configJson || mimeType !== 'image/png') {
+        return saveImage(canvas, mimeType, callback);
+    }
+    canvasToBlob(canvas, mimeType)
+        .then(blob => blob.arrayBuffer())
+        .then(buffer => {
+            const withConfig = embedConfigInPng(
+                new Uint8Array(buffer),
+                configJson
+            );
+            blobToObjectUrl(
+                new Blob([withConfig], { type: mimeType }),
+                callback
+            );
+        });
 };
 
 /**

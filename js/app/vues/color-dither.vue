@@ -73,11 +73,18 @@
                 :show-rename-palette="showRenamePalette"
             />
             <div :class="$style.overrideColorsContainer">
-                <checkbox
-                    label="Override colors"
-                    tooltip="Remap each palette color in the dithered image to an Amstrad CPC 6128 color"
-                    v-model="overrideColorsEnabled"
-                />
+                <div :class="$style.overrideChecks">
+                    <checkbox
+                        label="Override colors"
+                        tooltip="Remap each palette color in the dithered image to an Amstrad CPC 6128 color"
+                        v-model="overrideColorsEnabled"
+                    />
+                    <checkbox
+                        label="Auto refresh"
+                        tooltip="Automatically reassign pens to the nearest Amstrad CPC colors (without repeats) whenever the palette colors change"
+                        v-model="autoRefreshOverrideColors"
+                    />
+                </div>
                 <div
                     v-if="overrideColorsEnabled"
                     :class="$style.colorsListContainer"
@@ -86,6 +93,7 @@
                         v-for="(color, i) in colors"
                         :key="i"
                         :color-index.number="i"
+                        :source-color="color"
                         :model-value="overrideColors[i]"
                         :is-disabled="i >= numColors"
                         @update:model-value="updateOverrideColor(i, $event)"
@@ -150,6 +158,13 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
+}
+
+.overrideChecks {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 24px;
 }
 
 .optimizePalettePending {
@@ -302,6 +317,9 @@ export default {
             //output to an Amstrad CPC color (positionally, by palette index)
             overrideColorsEnabled: false,
             overrideColors: [],
+            //when enabled, pens are reassigned to the nearest CPC colors
+            //(without repeats) whenever the palette colors change
+            autoRefreshOverrideColors: false,
         };
     },
     computed: {
@@ -393,6 +411,13 @@ export default {
             },
         },
         colors(newValue, oldValue) {
+            //keep pens in sync with the palette when auto refresh is on
+            //(done first so the dither below uses the refreshed pens)
+            if (this.overrideColorsEnabled && this.autoRefreshOverrideColors) {
+                this.overrideColors = AmstradCpcPalette.nearestUniqueColors(
+                    this.colors
+                );
+            }
             //don't dither image if colors changed are not enabled
             if (
                 this.isLivePreviewEnabled &&
@@ -439,6 +464,14 @@ export default {
                     this.ditherImageWithSelectedAlgorithm();
                 }
             },
+        },
+        autoRefreshOverrideColors(isOn) {
+            //turning auto refresh on snaps the pens to the nearest CPC colors
+            if (isOn && this.overrideColorsEnabled) {
+                this.overrideColors = AmstradCpcPalette.nearestUniqueColors(
+                    this.colors
+                );
+            }
         },
     },
     methods: {
@@ -768,9 +801,11 @@ export default {
         //seeds each override slot with the nearest Amstrad CPC color to the
         //current palette color, so enabling the option produces a sensible result
         initializeOverrideColors() {
-            this.overrideColors = this.colors.map(colorHex =>
-                AmstradCpcPalette.nearestColor(colorHex)
-            );
+            this.overrideColors = this.autoRefreshOverrideColors
+                ? AmstradCpcPalette.nearestUniqueColors(this.colors)
+                : this.colors.map(colorHex =>
+                      AmstradCpcPalette.nearestColor(colorHex)
+                  );
         },
         updateOverrideColor(index, colorHex) {
             const overrideColorsCopy = this.overrideColors.slice();
@@ -802,6 +837,90 @@ export default {
                     pixels[i + 2] = replacement[2];
                 }
             }
+        },
+        /**
+         * Config save / load — serializes the settings that determine the
+         * color-dither output so they can be embedded in a PNG and reapplied.
+         */
+        getConfig() {
+            return {
+                version: 1,
+                type: 'color',
+                algorithm: this.selectedDitherAlgorithm.slug,
+                colorDitherModeId: this.selectedColorDitherModeId,
+                numColors: this.numColors,
+                colors: this.colors.slice(),
+                overrideColorsEnabled: this.overrideColorsEnabled,
+                overrideColors: this.overrideColors.slice(),
+                autoRefreshOverrideColors: this.autoRefreshOverrideColors,
+            };
+        },
+        //pads an array of hex colors to the max palette length
+        padColorsToMax(colors, fallback) {
+            const padded = colors.slice(0, COLOR_DITHER_MAX_COLORS);
+            while (padded.length < COLOR_DITHER_MAX_COLORS) {
+                padded.push(fallback(padded.length));
+            }
+            return padded;
+        },
+        applyConfig(config) {
+            if (!config || config.type !== 'color') {
+                return false;
+            }
+            //disable auto refresh while applying so it doesn't clobber the
+            //loaded pen assignments
+            this.autoRefreshOverrideColors = false;
+
+            if (config.algorithm) {
+                const algoIndex = this.ditherAlgorithms.findIndex(
+                    algo => algo.slug === config.algorithm
+                );
+                if (algoIndex >= 0) {
+                    this.selectedDitherAlgorithmIndex = algoIndex;
+                }
+            }
+            if (typeof config.colorDitherModeId === 'number') {
+                const modeIndex = this.colorDitherModes.findIndex(
+                    mode => mode.id === config.colorDitherModeId
+                );
+                if (modeIndex >= 0) {
+                    this.selectedColorDitherModeIndex = modeIndex;
+                }
+            }
+            if (typeof config.numColors === 'number') {
+                this.numColors = Math.max(
+                    2,
+                    Math.min(config.numColors, COLOR_DITHER_MAX_COLORS)
+                );
+            }
+            if (Array.isArray(config.colors) && config.colors.length) {
+                const colors = this.padColorsToMax(
+                    config.colors,
+                    i => this.colorsShadow[i] || '#000000'
+                );
+                //a loaded palette is a custom one
+                this.selectedPaletteIndex = 0;
+                this.colorsShadow = colors;
+            }
+            this.overrideColorsEnabled = !!config.overrideColorsEnabled;
+            if (
+                Array.isArray(config.overrideColors) &&
+                config.overrideColors.length
+            ) {
+                this.overrideColors = this.padColorsToMax(
+                    config.overrideColors,
+                    i =>
+                        AmstradCpcPalette.nearestColor(
+                            this.colors[i] || '#000000'
+                        )
+                );
+            } else if (this.overrideColorsEnabled) {
+                this.initializeOverrideColors();
+            }
+            //restore auto refresh last (recomputes pens if it was on)
+            this.autoRefreshOverrideColors = !!config.autoRefreshOverrideColors;
+
+            return true;
         },
     },
 };

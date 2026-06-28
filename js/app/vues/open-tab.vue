@@ -40,6 +40,14 @@
                 Random image
             </button>
         </fieldset>
+        <fieldset>
+            <legend>Settings</legend>
+            <file-input-button
+                label="Load config"
+                tooltip="Load dither settings previously saved inside an exported PNG"
+                :onFilesChanged="onConfigFileOpened"
+            />
+        </fieldset>
         <batch-image-selector
             v-if="imageFiles?.length > 1"
             v-model:fileIndex="currentImageFileIndex"
@@ -67,7 +75,8 @@
 </style>
 
 <script>
-import Fs, { isImageFile, isVideoFile } from '../fs.js';
+import Fs, { isImageFile, isVideoFile, fileToArray } from '../fs.js';
+import { extractConfigFromPng } from '../png-config.js';
 import { getRandomImage } from '../random-image.js';
 import FileInputButton from './widgets/file-input-button.vue';
 import VideoPlayer from './widgets/video-player.vue';
@@ -100,6 +109,10 @@ export default {
             required: true,
         },
         openImageError: {
+            type: Function,
+            required: true,
+        },
+        loadConfig: {
             type: Function,
             required: true,
         },
@@ -186,6 +199,33 @@ export default {
             this.openImageFile(files[0]).then(() => {
                 this.$emit('update:openFileMode', OPEN_FILE_MODE_SINGLE_IMAGE);
             });
+        },
+        onConfigFileOpened(files) {
+            const file = files[0];
+            if (!file) {
+                return;
+            }
+            fileToArray(file)
+                .then(bytes => {
+                    const json = extractConfigFromPng(bytes);
+                    if (!json) {
+                        return this.openImageError(
+                            `${file.name} does not contain saved Dithermark settings.`
+                        );
+                    }
+                    let config;
+                    try {
+                        config = JSON.parse(json);
+                    } catch (e) {
+                        return this.openImageError(
+                            `Could not read settings from ${file.name}.`
+                        );
+                    }
+                    this.loadConfig(config);
+                })
+                .catch(() =>
+                    this.openImageError(`Could not read ${file.name}.`)
+                );
         },
         /**
          *

@@ -1,0 +1,29 @@
+{
+    "name": "dithermark-desktop",
+    "version": "1.0.0",
+    "description": "Dithermark — self-contained desktop app",
+    "main": "main.cjs",
+    "author": "Ferran Quiles",
+    "license": "MIT",
+    "scripts": {
+        "prep": "node prep.cjs",
+        "start": "npm run prep && electron .",
+        "dist": "npm run prep && electron-builder"
+    },
+    "devDependencies": {
+        "electron": "^33.2.0",
+        "electron-builder": "^25.1.8"
+    },
+    "build": {
+        "appId": "com.dithermark.desktop",
+        "productName": "Dithermark",
+        "files": ["main.cjs", "web/**/*"],
+        "directories": {
+            "output": "dist"
+        },
+        "mac": {
+            "target": "dir",
+            "category": "public.app-category.graphics-design"
+        }
+    }
+}

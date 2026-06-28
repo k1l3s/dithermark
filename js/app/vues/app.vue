@@ -40,6 +40,7 @@
                         :image-opened="loadImage"
                         :onBatchFilesSelected="loadBatchImages"
                         :open-image-error="onOpenImageError"
+                        :load-config="loadDitherConfig"
                         :request-modal="showModalPrompt"
                         :getFfmpegReady="getFfmpegReady"
                         v-show="activeControlsTab === 0"
@@ -455,6 +456,7 @@
                         :isBatchConverting="isBatchConverting"
                         :useFfmpegServer="useFfmpegServer"
                         :isDev="isDev"
+                        :get-dither-config="getActiveDitherConfig"
                         v-show="activeControlsTab === 3"
                         ref="exportTab"
                     />
@@ -1153,6 +1155,108 @@ export default {
             Canvas.copy(this.transformedSourceCanvas, exportCanvas, scale);
 
             callback(exportCanvas, this.loadedImage.unsplash);
+        },
+        //config embedded in the exported PNG (only for color dither output)
+        getActiveDitherConfig() {
+            if (this.activeDitherComponentId !== this.colorDitherComponentId) {
+                return null;
+            }
+            const section = this.$refs.colorDitherSection;
+            if (!section || !section.getConfig) {
+                return null;
+            }
+            const config = section.getConfig();
+            //also capture the global pre-dither image adjustments
+            config.filters = this.getImageFilterConfig();
+            return config;
+        },
+        //the pre-dither image adjustments from the Image tab that affect output
+        getImageFilterConfig() {
+            return {
+                pixelate: this.selectedPixelateImageZoom,
+                brightness: this.selectedImageBrightnessIndex,
+                contrast: this.selectedImageContrastIndex,
+                saturation: this.selectedImageSaturationIndex,
+                hueRotation: this.hueRotationValue,
+                bilateralBefore: this.selectedBilateralFilterValueBefore,
+                smoothingBefore: this.selectedImageSmoothingRadiusBefore,
+                unsharpStrength: this.unsharpMaskStrength,
+                unsharpRadius: this.unsharpMaskRadius,
+            };
+        },
+        applyImageFilterConfig(filters) {
+            if (!filters) {
+                return;
+            }
+            const setIndex = (value, array, field) => {
+                if (typeof value === 'number') {
+                    this[field] = Math.max(
+                        0,
+                        Math.min(value, array.length - 1)
+                    );
+                }
+            };
+            setIndex(
+                filters.pixelate,
+                this.pixelateImageZooms,
+                'selectedPixelateImageZoom'
+            );
+            setIndex(
+                filters.brightness,
+                this.canvasFilterValues,
+                'selectedImageBrightnessIndex'
+            );
+            setIndex(
+                filters.contrast,
+                this.canvasFilterValues,
+                'selectedImageContrastIndex'
+            );
+            setIndex(
+                filters.saturation,
+                this.canvasFilterValues,
+                'selectedImageSaturationIndex'
+            );
+            setIndex(
+                filters.bilateralBefore,
+                this.bilateralFilterValues,
+                'selectedBilateralFilterValueBefore'
+            );
+            setIndex(
+                filters.smoothingBefore,
+                this.imageSmoothingValues,
+                'selectedImageSmoothingRadiusBefore'
+            );
+            if (typeof filters.hueRotation === 'number') {
+                this.hueRotationValue = Math.max(
+                    0,
+                    Math.min(Math.floor(filters.hueRotation), 359)
+                );
+            }
+            if (typeof filters.unsharpStrength === 'number') {
+                this.unsharpMaskStrength = filters.unsharpStrength;
+            }
+            if (typeof filters.unsharpRadius === 'number') {
+                this.unsharpMaskRadius = filters.unsharpRadius;
+            }
+        },
+        //applies a config loaded from a PNG to the color dither settings
+        loadDitherConfig(config) {
+            if (!config || config.type !== 'color') {
+                this.onOpenImageError(
+                    'These settings could not be applied (unsupported format).'
+                );
+                return;
+            }
+            //apply global filters first so the source is re-filtered before
+            //the dither settings are applied
+            this.applyImageFilterConfig(config.filters);
+            this.loadDitherTab(this.colorDitherComponentId);
+            this.$nextTick(() => {
+                const section = this.$refs.colorDitherSection;
+                if (section && section.applyConfig) {
+                    section.applyConfig(config);
+                }
+            });
         },
         /**
          *

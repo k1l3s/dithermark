@@ -50,18 +50,22 @@ function parseHex(hex) {
     ];
 }
 
+function distanceSquared(a, b) {
+    return (
+        (a[0] - b[0]) * (a[0] - b[0]) +
+        (a[1] - b[1]) * (a[1] - b[1]) +
+        (a[2] - b[2]) * (a[2] - b[2])
+    );
+}
+
 //returns the hex of the Amstrad CPC color closest (euclidean rgb distance) to the given hex color
 function nearestColor(hex) {
-    const [r, g, b] = parseHex(hex);
+    const source = parseHex(hex);
     let nearestHex = AMSTRAD_CPC_PALETTE[0].hex;
     let nearestDistance = Infinity;
 
     AMSTRAD_CPC_PALETTE.forEach(color => {
-        const [cr, cg, cb] = parseHex(color.hex);
-        const distance =
-            (r - cr) * (r - cr) +
-            (g - cg) * (g - cg) +
-            (b - cb) * (b - cb);
+        const distance = distanceSquared(source, parseHex(color.hex));
         if (distance < nearestDistance) {
             nearestDistance = distance;
             nearestHex = color.hex;
@@ -71,7 +75,49 @@ function nearestColor(hex) {
     return nearestHex;
 }
 
+//Assigns each input color the nearest Amstrad CPC color WITHOUT repeating a CPC
+//color, as long as that's possible (the CPC palette has 27 colors, so it's always
+//possible for up to 27 inputs). Uses a global greedy strategy: consider every
+//(input, cpc-color) pair in ascending distance order and lock in the closest
+//pairing whose input and cpc color are both still free. Any leftover inputs
+//(more than 27) fall back to plain nearestColor and may repeat.
+function nearestUniqueColors(hexColors) {
+    const sources = hexColors.map(parseHex);
+    const palette = AMSTRAD_CPC_PALETTE.map(color => parseHex(color.hex));
+
+    const pairs = [];
+    for (let i = 0; i < sources.length; i++) {
+        for (let j = 0; j < palette.length; j++) {
+            pairs.push([distanceSquared(sources[i], palette[j]), i, j]);
+        }
+    }
+    pairs.sort((a, b) => a[0] - b[0]);
+
+    const result = new Array(hexColors.length).fill(null);
+    const usedCpc = new Set();
+    let assigned = 0;
+    for (const [, i, j] of pairs) {
+        if (assigned === result.length) {
+            break;
+        }
+        if (result[i] === null && !usedCpc.has(j)) {
+            result[i] = AMSTRAD_CPC_PALETTE[j].hex;
+            usedCpc.add(j);
+            assigned++;
+        }
+    }
+    //fallback for the (rare) case of more than 27 input colors
+    for (let i = 0; i < result.length; i++) {
+        if (result[i] === null) {
+            result[i] = nearestColor(hexColors[i]);
+        }
+    }
+
+    return result;
+}
+
 export default {
     palette: AMSTRAD_CPC_PALETTE,
     nearestColor,
+    nearestUniqueColors,
 };
