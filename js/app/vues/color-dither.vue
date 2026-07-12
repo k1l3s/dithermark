@@ -76,13 +76,32 @@
                 <div :class="$style.overrideChecks">
                     <checkbox
                         label="Override colors"
-                        tooltip="Remap each palette color in the dithered image to an Amstrad CPC 6128 color"
+                        tooltip="Remap each palette color in the dithered image to a retro hardware color"
                         v-model="overrideColorsEnabled"
                     />
+                    <label v-if="overrideColorsEnabled" class="label">
+                        <span>Hardware</span>
+                        <select v-model="selectedRetroPaletteId">
+                            <option
+                                v-for="retroPalette in retroPalettes"
+                                :value="retroPalette.id"
+                                :key="retroPalette.id"
+                            >
+                                {{ retroPalette.name }}
+                            </option>
+                        </select>
+                    </label>
                     <checkbox
+                        v-if="overrideColorsEnabled"
                         label="Auto refresh"
-                        tooltip="Automatically reassign pens to the nearest Amstrad CPC colors (without repeats) whenever the palette colors change"
+                        tooltip="Automatically reassign pens to the nearest hardware colors whenever the palette colors change"
                         v-model="autoRefreshOverrideColors"
+                    />
+                    <checkbox
+                        v-if="overrideColorsEnabled && autoRefreshOverrideColors"
+                        label="Allow repeats"
+                        tooltip="Allow auto refresh to assign the same hardware color to more than one pen"
+                        v-model="allowRepeatOverrideColors"
                     />
                 </div>
                 <div
@@ -95,6 +114,7 @@
                         :color-index.number="i"
                         :source-color="color"
                         :model-value="overrideColors[i]"
+                        :palette="selectedRetroPaletteColors"
                         :is-disabled="i >= numColors"
                         @update:model-value="updateOverrideColor(i, $event)"
                     />
@@ -190,7 +210,7 @@ import {
     getColorDitherAlgorithms,
 } from '../models/dither-algorithms.js';
 import Palettes from '../models/color-palettes.js';
-import AmstradCpcPalette from '../models/amstrad-cpc-palette.js';
+import RetroPalettes from '../models/retro-palettes.js';
 import UserSettings from '../user-settings.js';
 import ColorDitherModes from '../../shared/color-dither-modes.js';
 import Canvas from '../canvas.js';
@@ -314,12 +334,18 @@ export default {
             hasColorPickerChangedTheColor: false,
             selectedPaletteIndexBeforeColorPickerOpened: 0,
             //override colors: remaps each palette color in the dithered
-            //output to an Amstrad CPC color (positionally, by palette index)
+            //output to a retro hardware color (positionally, by palette index)
             overrideColorsEnabled: false,
             overrideColors: [],
-            //when enabled, pens are reassigned to the nearest CPC colors
-            //(without repeats) whenever the palette colors change
+            //the retro machine whose colors the pens are chosen from
+            retroPalettes: RetroPalettes.palettes,
+            selectedRetroPaletteId: RetroPalettes.defaultId,
+            //when enabled, pens are reassigned to the nearest hardware colors
+            //whenever the palette colors change
             autoRefreshOverrideColors: false,
+            //when enabled, auto refresh may assign the same hardware color to
+            //more than one pen (otherwise pens are kept unique where possible)
+            allowRepeatOverrideColors: false,
         };
     },
     computed: {
@@ -380,6 +406,10 @@ export default {
         currentPalette() {
             return this.palettes[this.selectedPaletteIndex];
         },
+        selectedRetroPaletteColors() {
+            return RetroPalettes.getPaletteById(this.selectedRetroPaletteId)
+                .colors;
+        },
     },
     watch: {
         isLivePreviewEnabled(newValue) {
@@ -414,9 +444,7 @@ export default {
             //keep pens in sync with the palette when auto refresh is on
             //(done first so the dither below uses the refreshed pens)
             if (this.overrideColorsEnabled && this.autoRefreshOverrideColors) {
-                this.overrideColors = AmstradCpcPalette.nearestUniqueColors(
-                    this.colors
-                );
+                this.overrideColors = this.autoAssignOverrideColors();
             }
             //don't dither image if colors changed are not enabled
             if (
@@ -466,11 +494,21 @@ export default {
             },
         },
         autoRefreshOverrideColors(isOn) {
-            //turning auto refresh on snaps the pens to the nearest CPC colors
+            //turning auto refresh on snaps the pens to the nearest hardware colors
             if (isOn && this.overrideColorsEnabled) {
-                this.overrideColors = AmstradCpcPalette.nearestUniqueColors(
-                    this.colors
-                );
+                this.overrideColors = this.autoAssignOverrideColors();
+            }
+        },
+        allowRepeatOverrideColors() {
+            //re-run auto refresh so the new repeat setting takes effect
+            if (this.overrideColorsEnabled && this.autoRefreshOverrideColors) {
+                this.overrideColors = this.autoAssignOverrideColors();
+            }
+        },
+        selectedRetroPaletteId() {
+            //re-snap the pens to the newly selected hardware palette
+            if (this.overrideColorsEnabled) {
+                this.initializeOverrideColors();
             }
         },
     },
@@ -798,13 +836,26 @@ export default {
         /**
          * Override colors functions
          */
-        //seeds each override slot with the nearest Amstrad CPC color to the
+        //auto refresh assignment: nearest hardware color per pen, kept unique
+        //unless repeats are explicitly allowed
+        autoAssignOverrideColors() {
+            const palette = this.selectedRetroPaletteColors;
+            return this.allowRepeatOverrideColors
+                ? this.colors.map(colorHex =>
+                      RetroPalettes.nearestColor(palette, colorHex)
+                  )
+                : RetroPalettes.nearestUniqueColors(palette, this.colors);
+        },
+        //seeds each override slot with the nearest hardware color to the
         //current palette color, so enabling the option produces a sensible result
         initializeOverrideColors() {
             this.overrideColors = this.autoRefreshOverrideColors
-                ? AmstradCpcPalette.nearestUniqueColors(this.colors)
+                ? this.autoAssignOverrideColors()
                 : this.colors.map(colorHex =>
-                      AmstradCpcPalette.nearestColor(colorHex)
+                      RetroPalettes.nearestColor(
+                          this.selectedRetroPaletteColors,
+                          colorHex
+                      )
                   );
         },
         updateOverrideColor(index, colorHex) {
@@ -852,7 +903,9 @@ export default {
                 colors: this.colors.slice(),
                 overrideColorsEnabled: this.overrideColorsEnabled,
                 overrideColors: this.overrideColors.slice(),
+                retroPaletteId: this.selectedRetroPaletteId,
                 autoRefreshOverrideColors: this.autoRefreshOverrideColors,
+                allowRepeatOverrideColors: this.allowRepeatOverrideColors,
             };
         },
         //pads an array of hex colors to the max palette length
@@ -870,6 +923,12 @@ export default {
             //disable auto refresh while applying so it doesn't clobber the
             //loaded pen assignments
             this.autoRefreshOverrideColors = false;
+            //restore the hardware palette / repeat settings before the pens so
+            //any reassignment uses the right palette (defaults keep old configs working)
+            this.selectedRetroPaletteId = RetroPalettes.getPaletteById(
+                config.retroPaletteId
+            ).id;
+            this.allowRepeatOverrideColors = !!config.allowRepeatOverrideColors;
 
             if (config.algorithm) {
                 const algoIndex = this.ditherAlgorithms.findIndex(
@@ -910,7 +969,8 @@ export default {
                 this.overrideColors = this.padColorsToMax(
                     config.overrideColors,
                     i =>
-                        AmstradCpcPalette.nearestColor(
+                        RetroPalettes.nearestColor(
+                            this.selectedRetroPaletteColors,
                             this.colors[i] || '#000000'
                         )
                 );

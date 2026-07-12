@@ -18,7 +18,7 @@
                 :class="$style.penButton"
                 :style="{ 'background-color': modelValue, color: textColor }"
                 :disabled="isDisabled"
-                :title="`Pen (Amstrad CPC): ${selectedName} ${modelValue}`"
+                :title="`Pen: ${selectedName} ${modelValue}`"
                 @click="toggleOpen"
             >
                 <span :class="$style.penName">{{ selectedName }}</span>
@@ -127,6 +127,9 @@
     grid-template-columns: repeat(9, 22px);
     gap: 3px;
     padding: 6px;
+    //keep large hardware palettes (EGA, Amiga) usable
+    max-height: 280px;
+    overflow-y: auto;
     background-color: var(--pinned-controls-bg-color);
     border: 1px solid var(--border-color);
     border-radius: 5px;
@@ -149,11 +152,10 @@
 </style>
 
 <script>
-//pen assignment: maps a (non-CPC) palette color to an Amstrad CPC color,
-//chosen from a visual grid of the 27 CPC colors
+//pen assignment: maps a source palette color to a retro hardware color,
+//chosen from a visual grid of the selected machine's colors
 
 import ColorPicker from '../color-picker.js';
-import AmstradCpcPalette from '../models/amstrad-cpc-palette.js';
 import { lightness } from '../../shared/pixel-math-lite.js';
 
 export default {
@@ -162,14 +164,19 @@ export default {
             type: Number,
             default: 0,
         },
-        //the current palette color (non-CPC) this pen translates from
+        //the current palette color this pen translates from
         sourceColor: {
             type: String,
             required: true,
         },
-        //the assigned Amstrad CPC color (the "pen")
+        //the assigned retro hardware color (the "pen")
         modelValue: {
             type: String,
+            required: true,
+        },
+        //the retro hardware palette to choose pens from ([{name, hex}])
+        palette: {
+            type: Array,
             required: true,
         },
         isDisabled: {
@@ -179,7 +186,6 @@ export default {
     },
     data() {
         return {
-            palette: AmstradCpcPalette.palette,
             isOpen: false,
         };
     },
