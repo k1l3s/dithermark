@@ -138,6 +138,17 @@ export default {
         })
       }
     },
+    //used to set the color from outside of the picker, such as when
+    //sampling a color from the image canvas
+    setColorFromHex (hex) {
+      if (!this.isValidHex(hex)) {
+        return
+      }
+      this.colorChange({
+        hex,
+        dataKey: 'hex',
+      })
+    },
     clickCurrentColor () {
       this.colorChange({
         hex: this.currentColor,

@@ -1,7 +1,8 @@
 <template>
     <div v-scroll-into-view>
-        <div ref="colorPickerContainer" :class="$style.colorPickerContainer" ß>
+        <div ref="colorPickerContainer" :class="$style.colorPickerContainer">
             <photoshop-picker
+                ref="photoshopPicker"
                 :modelValue="selectedColor"
                 :should-live-update="shouldLiveUpdate"
                 @update:modelValue="bubbleEvent('update:modelValue', $event)"
@@ -59,6 +60,7 @@
 <script>
 import PhotoshopPicker from './vue-color/src/components/Photoshop.vue';
 import ScrollIntoViewDirective from './directives/scroll-into-view.js';
+import Eyedropper from '../color-picker-eyedropper.js';
 
 export default {
     props: {
@@ -77,9 +79,20 @@ export default {
     directives: {
         scrollIntoView: ScrollIntoViewDirective,
     },
+    //the picker is only mounted while it is open, so this is where we let
+    //the user sample colors by clicking on the image canvas
+    mounted() {
+        Eyedropper.register(this.colorPickedFromCanvas);
+    },
+    unmounted() {
+        Eyedropper.unregister(this.colorPickedFromCanvas);
+    },
     methods: {
         bubbleEvent(name, args) {
             this.$emit(name, args);
+        },
+        colorPickedFromCanvas(colorHex) {
+            this.$refs.photoshopPicker.setColorFromHex(colorHex);
         },
         getAttention() {
             const container = this.$refs.colorPickerContainer;

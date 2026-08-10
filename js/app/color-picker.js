@@ -55,19 +55,25 @@ function areColorArraysIdentical(array1, array2) {
     return array1.length == array2.length && array1.every((v, i) => v === array2[i]);
 }
 
-function pixelsToHexArray(pixels) {
-    function numToHex(num) {
-        const hex = num.toString(16);
-        if (hex.length < 2) {
-            return '0' + hex;
-        }
-        return hex;
+function numToHex(num) {
+    const hex = num.toString(16);
+    if (hex.length < 2) {
+        return '0' + hex;
     }
+    return hex;
+}
+
+//returns hex in form #ffffff
+function pixelToHex(r, g, b) {
+    return `#${numToHex(r)}${numToHex(g)}${numToHex(b)}`;
+}
+
+function pixelsToHexArray(pixels) {
     const pixelsLength = pixels.length;
     const ret = new Array(pixelsLength / 3);
 
     for (let i = 0, index = 0; i < pixelsLength; i += 3, index++) {
-        ret[index] = `#${numToHex(pixels[i])}${numToHex(pixels[i + 1])}${numToHex(pixels[i + 2])}`;
+        ret[index] = pixelToHex(pixels[i], pixels[i + 1], pixels[i + 2]);
     }
 
     return ret;
@@ -83,6 +89,7 @@ export function defaultBwColors() {
 export default {
     defaultBwColors,
     pixelFromHex,
+    pixelToHex,
     colorsToVecArray,
     areColorArraysIdentical,
     prepareForWorker,

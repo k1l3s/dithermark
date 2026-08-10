@@ -553,6 +553,8 @@
         </div>
         <image-canvas-supercontainer
             :showOriginalImage="showOriginalImage"
+            :is-eyedropper-active="isEyedropperActive"
+            :on-canvas-clicked="onCanvasClicked"
             v-show="isImageLoaded"
             ref="imageCanvasSupercontainer"
         />
@@ -640,6 +642,8 @@ import { nextTick } from 'vue';
 
 import UserSettings from '../user-settings.js';
 import Canvas from '../canvas.js';
+import ColorPicker from '../color-picker.js';
+import Eyedropper from '../color-picker-eyedropper.js';
 import WorkerHeaders from '../../shared/worker-headers.js';
 import WorkerUtil from '../worker-util.js';
 import WebGl from '../webgl/webgl.js';
@@ -794,6 +798,10 @@ export default {
             refs.imageCanvasSupercontainer.transformCanvasOutput
         );
 
+        Eyedropper.onActiveChanged(isActive => {
+            this.isEyedropperActive = isActive;
+        });
+
         //have to set alertsContainer property here, since it does not exist yet in created hook
         if (this.isWebglSupported) {
             this.$refs.alertsContainer.webglMaxTextureSize =
@@ -848,6 +856,8 @@ export default {
              */
             isLivePreviewEnabled: true,
             isColorPickerLivePreviewEnabledSetting: false,
+            //true while a color picker is open, so colors can be sampled from the image canvas
+            isEyedropperActive: false,
             automaticallyResizeLargeImages: true,
             /**
              * Webgl
@@ -1738,6 +1748,45 @@ export default {
                 getComputedStyle(this.$refs.controlsContainer).getPropertyValue(
                     'position'
                 ) === 'fixed'
+            );
+        },
+        /**
+         * Color picker eyedropper
+         */
+        //samples the clicked pixel, and sends it to the open color picker
+        //note we sample the full resolution canvas rather than the displayed one,
+        //so the result doesn't depend on the zoom level or the device pixel ratio
+        onCanvasClicked(isSourceCanvas, event) {
+            if (!this.isImageLoaded || !Eyedropper.isActive()) {
+                return;
+            }
+            const displayedCanvasObject = isSourceCanvas
+                ? sourceCanvasOutput
+                : transformCanvasOutput;
+            const sourceCanvasObject = isSourceCanvas
+                ? sourceCanvas
+                : this.transformedSourceCanvas;
+            const { width, height } = sourceCanvasObject.canvas;
+            if (width === 0 || height === 0) {
+                return;
+            }
+
+            const rect = displayedCanvasObject.canvas.getBoundingClientRect();
+            const toPixelIndex = (offset, displayedLength, imageLength) =>
+                Math.min(
+                    Math.max(
+                        0,
+                        Math.floor((offset / displayedLength) * imageLength)
+                    ),
+                    imageLength - 1
+                );
+            const x = toPixelIndex(event.clientX - rect.left, rect.width, width);
+            const y = toPixelIndex(event.clientY - rect.top, rect.height, height);
+
+            const pixel = sourceCanvasObject.context.getImageData(x, y, 1, 1)
+                .data;
+            Eyedropper.pickColor(
+                ColorPicker.pixelToHex(pixel[0], pixel[1], pixel[2])
             );
         },
         /**
